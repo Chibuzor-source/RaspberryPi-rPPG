@@ -3,6 +3,8 @@ import dataclasses
 
 import cv2
 
+from picamera2 import Picamera2
+
 import yarppg
 
 FONT_COLOR = (207, 117, 6)
@@ -22,17 +24,16 @@ class SimplestOpenCvWindowSettings(yarppg.settings.UiSettings):
 
 def launch_loop(rppg: yarppg.Rppg, config: SimplestOpenCvWindowSettings) -> int:
     """Launch a simple Qt6-based GUI visualizing rPPG results in real-time."""
-    cam = cv2.VideoCapture(config.video)
-    if not cam.isOpened():
-        print(f"Could not open {config.video=!r}")
-        return -1
+    picam2 = Picamera2()
+    picam2.configure(picam2.create_preview_configuration())
+    picam2.start()
+
 
     tracker = yarppg.FpsTracker()
     while True:
-        ret, frame = cam.read()
+        frame = picam2.capture_array()
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        if not ret:
-            break
+
         result = rppg.process_frame(frame)
         img = yarppg.roi.overlay_mask(
             frame, result.roi.mask != 0, alpha=config.roi_alpha
@@ -47,4 +48,6 @@ def launch_loop(rppg: yarppg.Rppg, config: SimplestOpenCvWindowSettings) -> int:
         print(result.value, result.hr)
         if cv2.waitKey(1) == ord("q") or _is_window_closed("yarPPG"):
             break
+        
+    picam2.stop()
     return 0

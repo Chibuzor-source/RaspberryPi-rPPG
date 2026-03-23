@@ -111,4 +111,8 @@ venv.bak/
 
 # devel
 .idea/
-.vscode/
+.vscode/                                                                      
+__pycache__/
+*.pyc
+*.log
+.env
