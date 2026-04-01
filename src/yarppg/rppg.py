@@ -1,7 +1,6 @@
 """Provides the Rppg orchestrator class.
 
 The orchestrator ties together the typical steps required in an rPPG pipeline:
-
 1. region of interest (ROI) identification ([yarppg.roi][])
 2. rPPG signal extraction ([yarppg.processors][])
 3. heart rate estimation ([yarppg.hr_calculator][])
@@ -13,14 +12,15 @@ additional information.
 
 ```python
 import yarppg
-
 default_settings = yarppg.Settings()
 rppg = yarppg.Rppg.from_settings(default_settings)
-
 result = rppg.process_frame(frame)  # input a (h x w x 3)-image array.
 print(result.hr)
-```
 
+# Access per-ROI green-channel means (multi-ROI milestone)
+for roi_name, color in result.roi_signal_means.items():
+    print(f"{roi_name}: green={color.g:.2f}")
+```
 """
 
 import pathlib
@@ -32,6 +32,7 @@ import scipy.signal
 
 from . import digital_filter, helpers, hr_calculator, processors, roi
 from .containers import RppgResult
+from .roi.roi_tools import masked_average
 from .settings import Settings
 
 
@@ -63,10 +64,34 @@ class Rppg:
         self.hr_calculator = hr_calc or hr_calculator.PeakBasedHrCalculator(fps)
 
     def process_frame(self, frame: np.ndarray) -> RppgResult:
-        """Process a single frame from video or live stream."""
-        roi = self.roi_detector.detect(frame)
-        result = self.processor.process(roi)
+        """Process a single frame from video or live stream.
+
+        Runs the full rPPG pipeline:
+        1. ROI detection  (now returns multi-ROI masks when using FaceMeshDetector)
+        2. rPPG signal extraction on the primary (lower-face) mask
+        3. Heart rate update
+
+        If the detector populated ``roi.roi_masks``, a mean Color is computed for
+        every named region and stored in ``result.roi_signal_means``.  This is the
+        foundation for the parallel signal extraction milestone.
+
+        Returns:
+            RppgResult with all original fields plus ``roi_signal_means`` dict.
+        """
+        detected_roi = self.roi_detector.detect(frame)
+        result = self.processor.process(detected_roi)
         result.hr = self.hr_calculator.update(result.value)
+
+        # --- Multi-ROI signal extraction -----------------------------------
+        # roi_masks is attached by FaceMeshDetector; it's an empty dict for
+        # detectors that don't support multi-ROI, so this block is a no-op.
+        roi_masks: dict = getattr(detected_roi, "roi_masks", {})
+        if roi_masks:
+            result.roi_signal_means = {
+                name: masked_average(detected_roi.baseimg, mask)
+                for name, mask in roi_masks.items()
+            }
+        # -------------------------------------------------------------------
 
         return result
 
